@@ -6,6 +6,7 @@
 //unsigned char** gpu_distances;
 unsigned char* gpu_sequences;
 unsigned char* gpu_distances;
+__device__ unsigned int hamming_pairs = 0;
 
 // upper-triangle array of discances beetwen sequences
 // distance may be either 0 or 1 because higher values are rejected
@@ -18,9 +19,9 @@ void allocate()
 }
 void zero_distances()
 {
-	unsigned char* temp2 = new unsigned char[H * N];
+	/*unsigned char* temp2 = new unsigned char[H * N];
 	memset(temp2, 0, H * N);
-	gpuErrchk(cudaMemcpy(gpu_distances, temp2, H * N, cudaMemcpyHostToDevice));
+	gpuErrchk(cudaMemcpy(gpu_distances, temp2, H * N, cudaMemcpyHostToDevice));*/
 }
 
 void disp_char(unsigned char c)
@@ -52,17 +53,17 @@ void input_test_1()
 		disp_char(temp[4]);
 		printf("\n");*/
 
-		gpuErrchk(cudaMemcpy(gpu_sequences + i*LL, temp, LL, cudaMemcpyHostToDevice));
+		gpuErrchk(cudaMemcpy(gpu_sequences + i * LL, temp, LL, cudaMemcpyHostToDevice));
 	}
 	zero_distances();
 }
 
 void input_data()
 {
-	unsigned char* temp = new unsigned char[LL*N];
+	unsigned char* temp = new unsigned char[LL * N];
 	for (int j = 0; j < LL * N; ++j)
 		temp[j] = (unsigned char)rand();
-	gpuErrchk(cudaMemcpy(gpu_sequences, temp, LL*N, cudaMemcpyHostToDevice));
+	gpuErrchk(cudaMemcpy(gpu_sequences, temp, LL * N, cudaMemcpyHostToDevice));
 	zero_distances();
 }
 
@@ -74,18 +75,18 @@ __global__ void mem_init(unsigned char* seqs, unsigned char* distances)
 	int warp_id = th_id % 32;
 
 	__shared__ unsigned int sum;
-	sum = 0;
 
 	__syncthreads();
 
 	for (int h = 0; h < H; ++h)
 	{
+		sum = 0;
 		if (block_id > h)
 		{
 			// inside 128 threads of block block_id
 			unsigned char c = seqs[h * LL + th_id] ^ seqs[block_id * LL + th_id];
 
-			for (int k = 0; k < 8; ++k)
+			for (int k = 0; k < BYTE; ++k)
 			{
 				sum += ((c >> k) & 0x0001);
 			}
@@ -93,13 +94,14 @@ __global__ void mem_init(unsigned char* seqs, unsigned char* distances)
 		__syncthreads();
 		if (th_id == 0)
 		{
-			distances[h * N + block_id] = sum;
+			distances[h * N + block_id] = (unsigned char)min(255, sum);
+			if (distances[h * N + block_id] == 1)
+			{
+				printf("(%d, %d) ", h, block_id);
+				hamming_pairs++;
+			}
 		}
-	}
-	__syncthreads();
-	if (block_id == 0 && th_id == 0)
-	{
-		printf("(0,1) = %d, (1,2) = %d\n", distances[1], distances[N + 1]);
+		__syncthreads();
 	}
 	__syncthreads();
 }
@@ -141,7 +143,8 @@ __global__ void hamming_one(unsigned char* seqs, unsigned char* distances)
 
 					if (onc_sum == 1)
 					{
-						printf("(%d, %d) ", block_id, j);
+						//printf("(%d, %d) ", block_id, j);
+						hamming_pairs++;
 					}
 				}
 			}
@@ -150,6 +153,7 @@ __global__ void hamming_one(unsigned char* seqs, unsigned char* distances)
 	}
 	__syncthreads();
 }
+__global__ void disp() { printf("Total hamming pairs: %d", hamming_pairs); }
 
 int main()
 {
@@ -158,8 +162,10 @@ int main()
 	allocate();
 	input_test_1();
 	printf("Kernel start!\n");
-	mem_init << <N, 128 >> > (gpu_sequences, gpu_distances);
+	mem_init << <N, LL >> > (gpu_sequences, gpu_distances);
 	checkCudaErrors(cudaDeviceSynchronize());
 	hamming_one << <N, BLOCK_TH >> > (gpu_sequences, gpu_distances);
+	checkCudaErrors(cudaDeviceSynchronize());
+	disp << <1, 1 >> > ();
 	checkCudaErrors(cudaDeviceSynchronize());
 }
