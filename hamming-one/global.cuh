@@ -56,6 +56,8 @@ inline void gpuAssert(cudaError_t code, const char* file, int line, bool abort =
 #define LL 128
 #define L 1024
 #define N 102400
+//102400
 #define H 5
 #define SH_SIZE H*N
 #define BLOCK_TH 1024
+#define CPU_CALL false
